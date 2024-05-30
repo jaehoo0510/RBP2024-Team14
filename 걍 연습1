@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+import rclpy
+import cv2
+import numpy as np
+from rclpy.node import Node
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge, CvBridgeError
+from std_msgs.msg import Header
+
+class DetermineColor(Node):
+    def __init__(self):
+        super().__init__('color_detector')
+        self.image_sub = self.create_subscription(Image, '/color', self.callback, 10)
+        self.color_pub = self.create_publisher(Header, '/rotate_cmd', 10)
+        self.bridge = CvBridge()
+
+    def callback(self, data):
+        try:
+            # Convert ROS image message to OpenCV image
+            image = self.bridge.imgmsg_to_cv2(data, 'bgr8')
+
+            # Convert to grayscale
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            
+            # Histogram equalization
+            equalized = cv2.equalizeHist(gray)
+
+            # Thresholding to create a binary image
+            _, binary = cv2.threshold(equalized, 50, 255, cv2.THRESH_BINARY_INV)
+
+            # Find contours
+            contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            # Initialize variables to store the detected monitor
+            monitor_contour = None
+            monitor_area = 0
+
+            # Loop over the contours to find the rectangular monitor
+            for contour in contours:
+                approx = cv2.approxPolyDP(contour, 0.02 * cv2.arcLength(contour, True), True)
+                area = cv2.contourArea(contour)
+                
+                if len(approx) == 4 and area > monitor_area:
+                    monitor_contour = approx
+                    monitor_area = area
+
+            if monitor_contour is not None:
+                # Get the bounding box of the monitor
+                x, y, w, h = cv2.boundingRect(monitor_contour)
+
+                # Extract the monitor region
+                monitor_region = image[y:y+h, x:x+w]
+
+                # Resize the monitor region to avoid perspective distortion
+                monitor_region = cv2.resize(monitor_region, (w, h), interpolation=cv2.INTER_LINEAR)
+
+                # Determine the main color in the monitor region
+                avg_color_per_row = np.average(monitor_region, axis=0)
+                avg_color = np.average(avg_color_per_row, axis=0)
+
+                red_intensity = avg_color[2]
+                green_intensity = avg_color[1]
+                blue_intensity = avg_color[0]
+
+                max_intensity = max(blue_intensity, green_intensity, red_intensity)
+
+                # Prepare rotate_cmd msg
+                msg = Header()
+                msg = data.header
+
+                if max_intensity == red_intensity:
+                    msg.frame_id = '-1'  # CW
+                elif max_intensity == green_intensity:
+                    msg.frame_id = '0'   # STOP
+                elif max_intensity == blue_intensity:
+                    msg.frame_id = '+1'  # CCW
+                else:
+                    msg.frame_id = '0'   # Default to STOP if no dominant color
+
+                # Publish color_state
+                self.color_pub.publish(msg)
+
+                # Display the detected monitor region for debugging purposes
+                cv2.drawContours(image, [monitor_contour], -1, (0, 255, 0), 3)
+                cv2.imshow('Monitor Region', monitor_region)
+
+            # Display the original image
+            cv2.imshow('Image', image)
+            cv2.waitKey(1)
+
+        except CvBridgeError as e:
+            self.get_logger().error('Failed to convert image: %s' % e)
+
+if __name__ == '__main__':
+    rclpy.init()
+    detector = DetermineColor()
+    rclpy.spin(detector)
+    detector.destroy_node()
+    rclpy.shutdown()
