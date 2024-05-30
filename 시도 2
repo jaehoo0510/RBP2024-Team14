@@ -2,7 +2,6 @@ import rclpy
 from rclpy.node import Node
 import numpy as np
 import cv2
-import time
 
 from sensor_msgs.msg import Image
 from std_msgs.msg import Header
@@ -25,17 +24,17 @@ class DetermineColor(Node):
             image = self.bridge.imgmsg_to_cv2(data, 'bgr8')
             hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
             msg = Header()
-            msg = data.header
+            msg.stamp = self.get_clock().now().to_msg()
             msg.frame_id = '0'  # default: STOP      
             cv2.imshow('rgb_Image', image)
             cv2.imshow('hsv_image', hsv)
-            
+           
             red_lower, red_upper = (0, 0, 100), (85, 120, 255)
             blue_lower, blue_upper = (80, 30, 30), (115, 255, 255)
             green_lower, green_upper = (40, 100, 0), (80, 255, 255)
             yellow_lower, yellow_upper = (20, 100, 100), (40, 255, 255)
             white_lower, white_upper = (200, 200, 200), (255, 255, 255)
-            
+           
             red_part = cv2.inRange(image, red_lower, red_upper)
             blue_part = cv2.inRange(hsv, blue_lower, blue_upper)
             green_part = cv2.inRange(hsv, green_lower, green_upper)
@@ -63,21 +62,21 @@ class DetermineColor(Node):
             green_pixels = cv2.countNonZero(green_part)
             white_pixels = cv2.countNonZero(white_part)
 
-            if ((red_pixels+30>=blue_pixels) and (red_pixels+30>=green_pixels) and (red_pixels+30>=yellow_pixels) and (red_pixels+30>=white_pixels)):
-                print("red!")
+            if ((red_pixels + 30 >= blue_pixels) and (red_pixels + 30 >= green_pixels) and (red_pixels + 30 >= yellow_pixels) and (red_pixels + 30 >= white_pixels)):
+                self.get_logger().info("red!")
                 msg.frame_id = '-1'
-            elif((blue_pixels+30>=red_pixels) and (blue_pixels+30>=green_pixels) and (blue_pixels+30>=yellow_pixels) and (blue_pixels+30>=white_pixels)):
-                print("blue!")
+            elif((blue_pixels + 30 >= red_pixels) and (blue_pixels + 30 >= green_pixels) and (blue_pixels + 30 >= yellow_pixels) and (blue_pixels + 30 >= white_pixels)):
+                self.get_logger().info("blue!")
                 msg.frame_id = '+1'
-            else: 
-                print("unknown!")
+            else:
+                self.get_logger().info("unknown!")
                 msg.frame_id = '0'
-                
+               
             cv2.waitKey(1)
             self.color_pub.publish(msg)
-            
+           
         except CvBridgeError as e:
-            print(e)
+            self.get_logger().error(f'CvBridge Error: {e}')
 
 def main(args=None):
     rclpy.init(args=args)
